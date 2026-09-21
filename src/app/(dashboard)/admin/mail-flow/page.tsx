@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useQueryState, parseAsInteger, parseAsString } from "nuqs";
 import { useTRPC } from "@/trpc/client";
 import { useQuery } from "@tanstack/react-query";
@@ -12,10 +13,11 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
+import { Skeleton } from "@/components/ui/skeleton";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 
-export default function MailFlowPage() {
+function MailFlowContent() {
   const trpc = useTRPC();
 
   // State Management with URL
@@ -235,5 +237,25 @@ export default function MailFlowPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function MailFlowPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex-1 space-y-8 p-8 pt-6 w-full max-w-[1600px] mx-auto">
+          <Skeleton className="h-10 w-64 rounded-2xl" />
+          <div className="grid gap-4 md:grid-cols-3">
+            <Skeleton className="h-28 rounded-2xl" />
+            <Skeleton className="h-28 rounded-2xl" />
+            <Skeleton className="h-28 rounded-2xl" />
+          </div>
+          <Skeleton className="h-96 w-full rounded-2xl" />
+        </div>
+      }
+    >
+      <MailFlowContent />
+    </Suspense>
   );
 }

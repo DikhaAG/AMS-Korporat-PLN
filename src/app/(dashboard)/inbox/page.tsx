@@ -1,15 +1,15 @@
 "use client"
 
+import { Suspense } from "react"
 import { columns } from "./columns"
 import { DataTable } from "@/components/ui/data-table"
 import { InboxFilters } from "@/components/inbox/inbox-filters"
 import { useTRPC } from "@/trpc/client"
 import { useQuery } from "@tanstack/react-query"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useQueryState, parseAsInteger, parseAsString, parseAsStringEnum } from "nuqs"
-import { DocumentStatusEnum } from "@/shared/schemas/document"
+import { useQueryState, parseAsInteger, parseAsString } from "nuqs"
 
-export default function InboxPage() {
+function InboxContent() {
   const trpc = useTRPC()
   
   // URL States via nuqs
@@ -67,5 +67,21 @@ export default function InboxPage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function InboxPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex flex-col h-full bg-transparent w-full max-w-[1600px] mx-auto p-8 space-y-6">
+          <Skeleton className="h-12 w-64 rounded-2xl" />
+          <Skeleton className="h-16 w-full rounded-2xl" />
+          <Skeleton className="h-96 w-full rounded-2xl" />
+        </div>
+      }
+    >
+      <InboxContent />
+    </Suspense>
   )
 }

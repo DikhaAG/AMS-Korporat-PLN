@@ -9,7 +9,7 @@ async function seed() {
 
   if (!email || !password) {
     console.warn("⚠️ SUPERADMIN_EMAIL or SUPERADMIN_PASSWORD not set. Skipping seed.");
-    return;
+    process.exit(0);
   }
 
   // 1. Idempotency Check
@@ -20,7 +20,7 @@ async function seed() {
   if (existingAdmin) {
     console.log("✅ Superadmin already exists. Ensuring admin role...");
     await db.update(user).set({ role: 'admin' }).where(eq(user.email, email));
-    return;
+    process.exit(0);
   }
 
   // 2. Secure Creation via Better Auth API

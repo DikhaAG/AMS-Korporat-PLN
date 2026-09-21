@@ -1,13 +1,15 @@
 "use client";
 
+import { Suspense } from "react";
 import { useQueryState, parseAsInteger } from "nuqs";
 import { useTRPC } from "@/trpc/client";
 import { useQuery } from "@tanstack/react-query";
 import { DataTable } from "@/components/ui/data-table";
 import { columns } from "./columns";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Activity } from "lucide-react";
 
-export default function ActivityLogsPage() {
+function ActivityLogsContent() {
   const trpc = useTRPC();
   const [page, setPage] = useQueryState("page", parseAsInteger.withDefault(1));
   // Note: we can add more filters to the TRPC route later (e.g., eventType, date range).
@@ -47,5 +49,20 @@ export default function ActivityLogsPage() {
         />
       </div>
     </div>
+  );
+}
+
+export default function ActivityLogsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex-1 space-y-8 p-8 pt-6">
+          <Skeleton className="h-10 w-64 rounded-2xl" />
+          <Skeleton className="h-96 w-full rounded-2xl" />
+        </div>
+      }
+    >
+      <ActivityLogsContent />
+    </Suspense>
   );
 }
