@@ -75,9 +75,11 @@ export const getDocumentSchema = z.object({
 export const dispositionActionSchema = z.object({
   documentId: z.string().uuid(),
   toPositionId: z.string().uuid(),
+  transmissionMode: z.enum(["DISPOSITION", "FORWARD"]).default("DISPOSITION"),
   dispositionType: z.enum(["OPEN", "CLOSED"]).default("OPEN"),
   actionChecklist: z.array(z.string()).default([]),
   instructionNotes: z.string().optional(),
+  deadline: z.string().optional(),
 });
 
 export type DispositionActionInput = z.infer<typeof dispositionActionSchema>;

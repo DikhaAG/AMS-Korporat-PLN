@@ -3,49 +3,66 @@
 import { useForm, Controller } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { dispositionActionSchema, DispositionActionInput } from "@/shared/schemas/document"
-import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { ArrowRight, CornerDownRight, CheckCircle2 } from "lucide-react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
+import { ArrowRight, CheckCircle2, ChevronsUpDown, Check, Send, Share2 } from "lucide-react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useTRPC } from "@/trpc/client"
+import { cn } from "@/lib/utils"
 
-const INSTRUCTION_OPTIONS = [
+import { z } from "zod"
+
+// 12 Standard Action Checklists from PLN AMS Korporat Benchmark (Image 5)
+const BENCHMARK_ACTION_CHECKLIST = [
   "Untuk Diketahui",
   "Untuk Diperhatikan",
-  "Siapkan Konsep",
-  "Tindak Lanjut",
-  "Hadiri / Wakili",
-  "Bicarakan"
+  "Untuk Dipelajari",
+  "Disiapkan Jawaban",
+  "Jawab Langsung",
+  "ACC Untuk Ditindak Lanjuti",
+  "Ambil Langkah Seperlunya",
+  "Dibicarakan",
+  "Dilaporkan",
+  "Segera Diselesaikan",
+  "Copy untuk ....",
+  "Lainnya"
 ]
 
 export function DispositionForm({ documentId, onSuccess }: { documentId: string, onSuccess?: () => void }) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
+
+  const positionsQuery = useQuery(trpc.document.getRecipientPositions.queryOptions())
+
   const createDispositionMutation = useMutation(
     trpc.document.createDisposition.mutationOptions({
       onSuccess: () => {
-        // Re-fetch document to see the new disposition
         queryClient.invalidateQueries({ queryKey: [["document", "getDocument"]] })
+        queryClient.invalidateQueries({ queryKey: [["document", "getDocuments"]] })
         if (onSuccess) onSuccess()
       }
     })
   )
 
-  const { register, handleSubmit, control, watch, setValue, formState: { errors } } = useForm<DispositionActionInput>({
-    // @ts-ignore
+  const { register, handleSubmit, control, watch, setValue, formState: { errors } } = useForm<z.input<typeof dispositionActionSchema>, any, DispositionActionInput>({
     resolver: zodResolver(dispositionActionSchema),
     defaultValues: {
       documentId,
+      transmissionMode: "DISPOSITION",
       dispositionType: "OPEN",
-      actionChecklist: [],
-      toPositionId: "", // Will be selected by user
+      actionChecklist: ["Untuk Diketahui"],
+      toPositionId: "",
       instructionNotes: "",
     }
   })
 
-  const actionChecklist = watch("actionChecklist")
+  const transmissionMode = watch("transmissionMode")
+  const actionChecklist = watch("actionChecklist") || []
+  const selectedPositionId = watch("toPositionId")
 
   const toggleChecklist = (item: string) => {
     if (actionChecklist.includes(item)) {
@@ -59,107 +76,219 @@ export function DispositionForm({ documentId, onSuccess }: { documentId: string,
     createDispositionMutation.mutate(values)
   }
 
+  const selectedPosition = positionsQuery.data?.find(p => p.id === selectedPositionId)
+
   return (
-    // @ts-ignore
-    <form onSubmit={handleSubmit(onSubmit as any)} className="bg-white dark:bg-neutral-800 rounded-[1.5rem] border border-border/50 p-6 space-y-8 m-0 h-full flex flex-col">
+    <form onSubmit={handleSubmit(onSubmit)} className="bg-white dark:bg-neutral-900 rounded-[1.5rem] border border-border/60 p-6 space-y-6 flex flex-col shadow-ambient">
       
-      {/* Tipe Disposisi */}
-      <div className="flex items-center justify-between p-4 bg-muted/20 rounded-xl border border-border/50 shrink-0">
-        <span className="font-bold text-sm tracking-wide">Tipe Disposisi</span>
+      {/* Top Selector: Disposisi vs Teruskan (Matching Image 5 Header) */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-border/50">
+        <h3 className="font-bold text-base text-foreground flex items-center gap-2">
+          {transmissionMode === "DISPOSITION" ? (
+            <>
+              <Send className="w-4 h-4 text-[#145f74]" />
+              Formulir Disposisi Naskah
+            </>
+          ) : (
+            <>
+              <Share2 className="w-4 h-4 text-[#145f74]" />
+              Teruskan Naskah Dinas
+            </>
+          )}
+        </h3>
+
         <Controller
           control={control}
-          name="dispositionType"
+          name="transmissionMode"
           render={({ field }) => (
-            <RadioGroup 
-              value={field.value} 
-              onValueChange={field.onChange} 
-              className="flex bg-white rounded-lg p-1 border border-border/50 shadow-sm"
+            <RadioGroup
+              value={field.value}
+              onValueChange={field.onChange}
+              className="flex items-center gap-4 bg-muted/30 p-1.5 rounded-xl border border-border/40"
             >
-              <div className="flex items-center">
-                <RadioGroupItem value="OPEN" id="type-open" className="peer sr-only" />
-                <label htmlFor="type-open" className="cursor-pointer px-4 py-1.5 text-sm font-medium rounded-md peer-data-[state=checked]:bg-primary peer-data-[state=checked]:text-white transition-colors">Terbuka</label>
+              <div className="flex items-center gap-2">
+                <RadioGroupItem value="DISPOSITION" id="mode-disposition" />
+                <label htmlFor="mode-disposition" className="text-xs font-bold cursor-pointer select-none">
+                  Disposisi
+                </label>
               </div>
-              <div className="flex items-center">
-                <RadioGroupItem value="CLOSED" id="type-closed" className="peer sr-only" />
-                <label htmlFor="type-closed" className="cursor-pointer px-4 py-1.5 text-sm font-medium rounded-md peer-data-[state=checked]:bg-primary peer-data-[state=checked]:text-white transition-colors">Tertutup</label>
+              <div className="flex items-center gap-2">
+                <RadioGroupItem value="FORWARD" id="mode-forward" />
+                <label htmlFor="mode-forward" className="text-xs font-bold cursor-pointer select-none">
+                  Teruskan
+                </label>
               </div>
             </RadioGroup>
           )}
         />
       </div>
 
-      {/* Chiclet Grid */}
-      <div className="shrink-0">
-        <h3 className="font-bold text-sm mb-4">Pilih Instruksi</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {INSTRUCTION_OPTIONS.map((item, index) => {
+      {/* 12 Standard Aksi Checklist in 2 Columns (Image 5 Benchmark) */}
+      <div className="space-y-3">
+        <label className="text-xs font-bold tracking-wider text-muted-foreground uppercase">
+          Aksi / Tindakan ({actionChecklist.length} dipilih)
+        </label>
+        
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {BENCHMARK_ACTION_CHECKLIST.map((item, index) => {
             const isChecked = actionChecklist.includes(item)
             return (
-              <label 
+              <div
                 key={item}
-                className={`
-                  relative flex items-center justify-between p-3 rounded-xl border-2 cursor-pointer transition-all duration-300 ease-[var(--ease-fluid)] select-none
-                  ${isChecked ? 'border-primary bg-primary/5 shadow-inner-glow' : 'border-border/50 bg-white hover:border-primary/30'}
-                `}
                 onClick={() => toggleChecklist(item)}
+                className={cn(
+                  "flex items-center gap-2.5 p-2.5 rounded-xl border text-xs font-medium cursor-pointer transition-all select-none",
+                  isChecked 
+                    ? "border-[#145f74] bg-[#145f74]/5 text-[#145f74] font-semibold" 
+                    : "border-border/40 bg-muted/10 hover:border-border/80 text-foreground/80"
+                )}
               >
-                <div className="flex items-center gap-3">
-                  <Checkbox 
-                    checked={isChecked} 
-                    className="data-[state=checked]:bg-primary rounded-md pointer-events-none"
-                  />
-                  <span className={`text-sm font-semibold ${isChecked ? 'text-primary' : 'text-foreground/80'}`}>
-                    {index + 1}. {item}
-                  </span>
-                </div>
-                {isChecked && <CheckCircle2 className="w-5 h-5 text-primary animate-in zoom-in duration-300" />}
-              </label>
+                <Checkbox
+                  checked={isChecked}
+                  className="data-[state=checked]:bg-[#145f74] data-[state=checked]:border-[#145f74] h-4 w-4 rounded"
+                />
+                <span className="truncate">
+                  {index + 1}. {item}
+                </span>
+              </div>
             )
           })}
         </div>
-        {errors.actionChecklist && <p className="text-xs text-destructive mt-2">{errors.actionChecklist.message}</p>}
+        {errors.actionChecklist && (
+          <p className="text-xs text-destructive">{errors.actionChecklist.message}</p>
+        )}
       </div>
 
-      {/* Kepada & Keterangan */}
-      <div className="space-y-6 flex-1">
-        <div>
-          <label className="font-bold text-sm block mb-3">Teruskan Kepada (ID Posisi)</label>
-          <div className="space-y-3 pl-4 border-l-2 border-muted">
-            <div className="relative">
-              <CornerDownRight className="absolute -left-8 top-3 h-4 w-4 text-muted-foreground" />
-              <Input 
-                placeholder="Masukkan ID Posisi Tujuan (UUID)..." 
-                className="h-12 rounded-xl bg-muted/20 border-border/50 focus-visible:ring-primary/30 text-base font-mono" 
-                {...register("toPositionId")}
+      {/* Kepada: Dynamic Position Combobox */}
+      <div className="space-y-2">
+        <label className="text-xs font-bold tracking-wider text-muted-foreground uppercase">
+          Kepada (Posisi Penerima)
+        </label>
+        <Controller
+          control={control}
+          name="toPositionId"
+          render={({ field }) => (
+            <Popover>
+              <PopoverTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    className={cn(
+                      "w-full justify-between h-12 rounded-xl bg-muted/20 border-border/50 text-sm font-normal text-left px-4",
+                      !field.value && "text-muted-foreground"
+                    )}
+                  >
+                    <span className="truncate">
+                      {selectedPosition 
+                        ? `${selectedPosition.title} (${selectedPosition.code})` 
+                        : "Pilih posisi bawahan / unit penerima..."}
+                    </span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                }
               />
-            </div>
-            {errors.toPositionId && <p className="text-xs text-destructive">{errors.toPositionId.message}</p>}
-          </div>
+              <PopoverContent className="w-[450px] p-0 rounded-xl shadow-ambient" align="start">
+                <Command>
+                  <CommandInput placeholder="Cari posisi atau jabatan..." className="h-10 text-xs" />
+                  <CommandList>
+                    <CommandEmpty>Posisi tidak ditemukan.</CommandEmpty>
+                    <CommandGroup heading="Daftar Posisi Organisasi">
+                      {positionsQuery.data?.map((pos) => (
+                        <CommandItem
+                          key={pos.id}
+                          value={`${pos.title} ${pos.code}`}
+                          onSelect={() => field.onChange(pos.id)}
+                          className="flex items-center justify-between text-xs py-2"
+                        >
+                          <div className="flex flex-col">
+                            <span className="font-semibold">{pos.title}</span>
+                            <span className="text-[10px] text-muted-foreground">{pos.code}</span>
+                          </div>
+                          <Check
+                            className={cn(
+                              "h-4 w-4 text-[#145f74]",
+                              field.value === pos.id ? "opacity-100" : "opacity-0"
+                            )}
+                          />
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          )}
+        />
+        {errors.toPositionId && (
+          <p className="text-xs text-destructive">{errors.toPositionId.message}</p>
+        )}
+      </div>
+
+      {/* Keterangan / Instruksi Tambahan */}
+      <div className="space-y-2">
+        <label className="text-xs font-bold tracking-wider text-muted-foreground uppercase">
+          Keterangan / Catatan Tambahan
+        </label>
+        <Textarea
+          placeholder="Tambahkan arahan detail atau batas waktu penyelesaian..."
+          className="min-h-[85px] rounded-xl bg-muted/20 border-border/50 focus-visible:ring-[#145f74]/30 text-xs p-3 resize-none"
+          {...register("instructionNotes")}
+        />
+      </div>
+
+      {/* Tipe Disposisi: Terbuka vs Tertutup (Image 5 Benchmark) */}
+      <div className="flex items-center justify-between p-3.5 bg-muted/20 rounded-xl border border-border/40">
+        <div>
+          <span className="font-bold text-xs">Tipe Disposisi</span>
+          <p className="text-[10px] text-muted-foreground">
+            {watch("dispositionType") === "OPEN" 
+              ? "Terbuka: dapat dilihat seluruh rantai disposisi unit." 
+              : "Tertutup: hanya terbaca oleh pemberi & penerima instruksi."}
+          </p>
         </div>
 
-        <div>
-          <label className="font-bold text-sm block mb-3">Keterangan / Catatan</label>
-          <Textarea 
-            placeholder="Tambahkan instruksi spesifik disini..." 
-            className="resize-none h-32 rounded-xl bg-muted/20 border-border/50 focus-visible:ring-primary/30 text-base p-4" 
-            {...register("instructionNotes")}
-          />
-        </div>
+        <Controller
+          control={control}
+          name="dispositionType"
+          render={({ field }) => (
+            <RadioGroup
+              value={field.value}
+              onValueChange={field.onChange}
+              className="flex items-center gap-3"
+            >
+              <div className="flex items-center gap-1.5">
+                <RadioGroupItem value="OPEN" id="type-open" />
+                <label htmlFor="type-open" className="text-xs font-medium cursor-pointer">
+                  Terbuka
+                </label>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <RadioGroupItem value="CLOSED" id="type-closed" />
+                <label htmlFor="type-closed" className="text-xs font-medium cursor-pointer">
+                  Tertutup
+                </label>
+              </div>
+            </RadioGroup>
+          )}
+        />
       </div>
-      
-      {/* Magnetic CTA Action */}
-      <div className="pt-4 pb-2 shrink-0">
-        <button 
-          type="submit"
-          disabled={createDispositionMutation.isPending}
-          className="group relative w-full flex items-center justify-center bg-[#145f74] hover:bg-[#125365] text-white rounded-2xl h-14 font-bold text-base transition-all duration-700 ease-[var(--ease-fluid)] active:scale-[0.98] shadow-inner-glow disabled:opacity-70"
-        >
-          {createDispositionMutation.isPending ? "MEMPROSES..." : "KIRIM DISPOSISI"}
-          <div className="absolute right-2 w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center transition-all duration-700 ease-[var(--ease-fluid)] group-hover:bg-white/20 group-hover:scale-105 group-hover:-translate-y-[1px]">
-            <ArrowRight className="h-5 w-5" />
-          </div>
-        </button>
-      </div>
+
+      {/* Submit Button */}
+      <Button
+        type="submit"
+        disabled={createDispositionMutation.isPending || !selectedPositionId}
+        className="w-full h-12 rounded-xl bg-[#145f74] hover:bg-[#104d5e] text-white font-bold text-sm shadow-sm transition-all flex items-center justify-center gap-2"
+      >
+        {createDispositionMutation.isPending ? (
+          "Mengirim Instruksi..."
+        ) : (
+          <>
+            {transmissionMode === "DISPOSITION" ? "Kirim Disposisi" : "Teruskan Naskah"}
+            <ArrowRight className="w-4 h-4" />
+          </>
+        )}
+      </Button>
     </form>
   )
 }

@@ -14,7 +14,8 @@ import { eq, and, sql } from "drizzle-orm";
 import { 
   createDocumentDraftSchema, 
   documentReviewActionSchema,
-  getDocumentsSchema
+  getDocumentsSchema,
+  dispositionActionSchema
 } from "@/shared/schemas/document";
 
 export const documentRouter = createTRPCRouter({
@@ -34,17 +35,18 @@ export const documentRouter = createTRPCRouter({
             classificationCode: input.classificationCode,
             creatorUserId: ctx.user.id,
             senderPositionId: ctx.activePositionId,
-            currentStatus: "DRAFT",
+            currentStatus: "IN_REVIEW",
+            isLocked: true,
           })
           .returning();
 
         await tx.insert(documentAuditTrails).values({
           documentId: newDoc.id,
           actorUserId: ctx.user.id,
-          eventType: "DRAFT_CREATED",
+          eventType: "DRAFT_CREATED_AND_SUBMITTED",
           ipAddress: ctx.headers.get("x-forwarded-for") || null,
           userAgent: ctx.headers.get("user-agent") || null,
-          statePayload: { status: "DRAFT" },
+          statePayload: { status: "IN_REVIEW" },
         });
 
         const recipientsToInsert = [
@@ -62,6 +64,23 @@ export const documentRouter = createTRPCRouter({
         
         if (recipientsToInsert.length > 0) {
           await tx.insert(documentRecipients).values(recipientsToInsert);
+        }
+
+        // Auto-assign first recipient or parent superior as reviewer
+        const [senderPos] = await tx
+          .select()
+          .from(orgPositions)
+          .where(eq(orgPositions.id, ctx.activePositionId));
+
+        const targetReviewerId = senderPos?.parentId || input.recipientPositionIds[0];
+        if (targetReviewerId) {
+          await tx.insert(documentApprovals).values({
+            documentId: newDoc.id,
+            reviewerPositionId: targetReviewerId,
+            stepOrder: 1,
+            approvalRole: "FINAL_SIGNER",
+            actionStatus: "PENDING",
+          });
         }
 
         return newDoc;
@@ -302,33 +321,95 @@ export const documentRouter = createTRPCRouter({
   getDocument: protectedPositionProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
-      const [doc] = await ctx.db
-        .select()
-        .from(documents)
-        .where(eq(documents.id, input.id));
+      const doc = await ctx.db.query.documents.findFirst({
+        where: eq(documents.id, input.id),
+        with: {
+          creator: {
+            columns: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+          senderPosition: true,
+          recipients: {
+            with: {
+              position: true,
+            },
+          },
+          approvals: {
+            with: {
+              reviewerPosition: true,
+              actualReviewerUser: {
+                columns: {
+                  id: true,
+                  name: true,
+                  email: true,
+                },
+              },
+            },
+            orderBy: (approvals, { asc }) => [asc(approvals.stepOrder), asc(approvals.actedAt)],
+          },
+          dispositions: {
+            with: {
+              fromPosition: true,
+              toPosition: true,
+            },
+            orderBy: (dispositions, { asc }) => [asc(dispositions.createdAt)],
+          },
+        },
+      });
 
       if (!doc) throw new TRPCError({ code: "NOT_FOUND" });
 
-      const docDispositions = await ctx.db
+      // Fetch active position details
+      const [currentPosition] = await ctx.db
         .select()
-        .from(dispositions)
-        .where(eq(dispositions.documentId, input.id))
-        .orderBy(sql`${dispositions.createdAt} ASC`);
+        .from(orgPositions)
+        .where(eq(orgPositions.id, ctx.activePositionId));
+
+      const isSigner = Boolean(currentPosition?.isSigner);
+      
+      // Determine if active user can review this document
+      const hasPendingApproval = doc.approvals?.some(
+        (a) => a.reviewerPositionId === ctx.activePositionId && a.actionStatus === "PENDING"
+      );
+      const canReview = doc.currentStatus === "IN_REVIEW" && (hasPendingApproval || isSigner);
+
+      // Determine if active user can disposition
+      const isRecipient = doc.recipients?.some((r) => r.positionId === ctx.activePositionId);
+      const isSender = doc.senderPositionId === ctx.activePositionId;
+      const hasReceivedDisposition = doc.dispositions?.some((d) => d.toPositionId === ctx.activePositionId);
+      const canDisposition = doc.currentStatus === "SIGNED_AND_PUBLISHED" && (isRecipient || isSender || hasReceivedDisposition);
+
+      // Filter active dispositions targeted to current position
+      const myActiveDispositions = doc.dispositions?.filter(
+        (d) => d.toPositionId === ctx.activePositionId
+      ) || [];
+
+      // Calculate retention periods if null
+      const createdDate = new Date(doc.createdAt);
+      const activeEnd = doc.retentionActiveDate 
+        ? new Date(doc.retentionActiveDate) 
+        : new Date(createdDate.getFullYear() + 2, createdDate.getMonth(), createdDate.getDate());
+      const inactiveEnd = doc.retentionInactiveDate 
+        ? new Date(doc.retentionInactiveDate) 
+        : new Date(activeEnd.getFullYear() + 3, activeEnd.getMonth(), activeEnd.getDate());
 
       return {
         ...doc,
-        dispositions: docDispositions,
+        retentionActiveDate: activeEnd.toISOString(),
+        retentionInactiveDate: inactiveEnd.toISOString(),
+        currentPosition,
+        isSigner,
+        canReview,
+        canDisposition,
+        myActiveDispositions,
       };
     }),
 
   createDisposition: protectedPositionProcedure
-    .input(z.object({
-      documentId: z.string().uuid(),
-      toPositionId: z.string().uuid(),
-      dispositionType: z.enum(["OPEN", "CLOSED"]).default("OPEN"),
-      actionChecklist: z.array(z.string()).default([]),
-      instructionNotes: z.string().optional(),
-    }))
+    .input(dispositionActionSchema)
     .mutation(async ({ ctx, input }) => {
       return await ctx.db.transaction(async (tx) => {
         const [doc] = await tx
@@ -344,19 +425,25 @@ export const documentRouter = createTRPCRouter({
             documentId: input.documentId,
             fromPositionId: ctx.activePositionId,
             toPositionId: input.toPositionId,
+            transmissionMode: input.transmissionMode || "DISPOSITION",
             dispositionType: input.dispositionType,
             actionChecklist: input.actionChecklist,
             instructionNotes: input.instructionNotes,
+            deadline: input.deadline ? new Date(input.deadline) : null,
           })
           .returning();
 
         await tx.insert(documentAuditTrails).values({
           documentId: doc.id,
           actorUserId: ctx.user.id,
-          eventType: "DISPOSITION_CREATED",
+          eventType: input.transmissionMode === "FORWARD" ? "DOCUMENT_FORWARDED" : "DISPOSITION_CREATED",
           ipAddress: ctx.headers.get("x-forwarded-for") || null,
           userAgent: ctx.headers.get("user-agent") || null,
-          statePayload: { dispositionId: newDisposition.id },
+          statePayload: { 
+            dispositionId: newDisposition.id, 
+            toPositionId: input.toPositionId,
+            transmissionMode: input.transmissionMode 
+          },
         });
 
         return newDisposition;

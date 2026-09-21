@@ -19,6 +19,8 @@ export type Document = {
   senderPositionCode?: string | null
 }
 
+import Link from "next/link"
+
 export const columns: ColumnDef<Document>[] = [
   {
     id: "select",
@@ -44,7 +46,7 @@ export const columns: ColumnDef<Document>[] = [
     header: "No",
     cell: ({ row, table }) => {
       const index = row.index + 1
-      return <div className="text-center">{index}</div>
+      return <div className="text-center font-mono text-xs">{index}</div>
     }
   },
   {
@@ -52,13 +54,15 @@ export const columns: ColumnDef<Document>[] = [
     header: "Nomor Nota Dinas",
     cell: ({ row }) => {
       const num = row.getValue("documentNumber") as string
-      // Render as a teal link
       return (
         <div className="flex items-center gap-2">
           {row.index === 0 && <AlertCircle className="w-4 h-4 text-destructive shrink-0" />}
-          <a href={`/document/${row.original.id}`} className="font-medium text-[#145f74] hover:underline">
+          <Link 
+            href={`/document/${row.original.id}`} 
+            className="font-bold text-xs sm:text-sm text-[#145f74] hover:underline flex items-center gap-1.5"
+          >
             {num || "DRAFT"}
-          </a>
+          </Link>
         </div>
       )
     }
@@ -71,8 +75,8 @@ export const columns: ColumnDef<Document>[] = [
       const code = row.original.senderPositionCode
       return (
         <div className="flex flex-col">
-          <span className="font-semibold text-sm truncate max-w-[180px]" title={title}>{title}</span>
-          {code && <span className="text-xs text-muted-foreground">{code}</span>}
+          <span className="font-semibold text-xs sm:text-sm truncate max-w-[180px]" title={title}>{title}</span>
+          {code && <span className="text-[10px] text-muted-foreground">{code}</span>}
         </div>
       )
     }
@@ -80,34 +84,47 @@ export const columns: ColumnDef<Document>[] = [
   {
     accessorKey: "subject",
     header: "Hal",
+    cell: ({ row }) => {
+      return (
+        <Link 
+          href={`/document/${row.original.id}`}
+          className="hover:text-[#145f74] hover:underline font-medium text-xs sm:text-sm line-clamp-2 block"
+        >
+          {row.getValue("subject")}
+        </Link>
+      )
+    }
   },
   {
     accessorKey: "createdAt",
     header: "Tgl Nota Dinas",
     cell: ({ row }) => {
       const date = new Date(row.getValue("createdAt"))
-      return <div>{date.toLocaleDateString("id-ID")}</div>
+      return <div className="text-xs">{date.toLocaleDateString("id-ID")}</div>
     }
   },
   {
     id: "tglTerima",
     header: "Tgl Terima",
     cell: ({ row }) => {
-      // updatedAt indicates when it last transitioned state (e.g. into INBOX/SIGNED)
       const date = new Date(row.original.updatedAt || row.original.createdAt)
-      return <div>{date.toLocaleDateString("id-ID")}</div>
+      return <div className="text-xs text-muted-foreground">{date.toLocaleDateString("id-ID")}</div>
     }
   },
   {
     id: "actions",
     header: "Action",
-    cell: () => {
+    cell: ({ row }) => {
       return (
         <div className="flex items-center gap-1 text-muted-foreground">
-          <Button variant="ghost" size="icon" className="h-8 w-8 hover:text-primary"><Star className="h-4 w-4" /></Button>
-          <Button variant="ghost" size="icon" className="h-8 w-8 hover:text-primary"><Mail className="h-4 w-4" /></Button>
-          <Button variant="ghost" size="icon" className="h-8 w-8 hover:text-primary"><Reply className="h-4 w-4" /></Button>
-          <Button variant="ghost" size="icon" className="h-8 w-8 hover:text-primary"><Paperclip className="h-4 w-4" /></Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7 hover:text-primary"><Star className="h-3.5 w-3.5" /></Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7 hover:text-primary"><Mail className="h-3.5 w-3.5" /></Button>
+          <Link href={`/document/${row.original.id}`} title="Buka Detail & Disposisi">
+            <Button variant="ghost" size="icon" className="h-7 w-7 hover:text-[#145f74] hover:bg-[#145f74]/10">
+              <Reply className="h-3.5 w-3.5" />
+            </Button>
+          </Link>
+          <Button variant="ghost" size="icon" className="h-7 w-7 hover:text-primary"><Paperclip className="h-3.5 w-3.5" /></Button>
         </div>
       )
     }

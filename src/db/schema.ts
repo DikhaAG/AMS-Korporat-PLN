@@ -197,6 +197,7 @@ export const documentsRelations = relations(documents, ({ one, many }) => ({
   approvals: many(documentApprovals),
   auditTrails: many(documentAuditTrails),
   recipients: many(documentRecipients),
+  dispositions: many(dispositions),
 }));
 
 export const documentApprovalsRelations = relations(documentApprovals, ({ one }) => ({

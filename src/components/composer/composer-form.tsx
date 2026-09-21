@@ -59,7 +59,7 @@ export function ComposerForm() {
             control={control}
             name="documentType"
             render={({ field }) => (
-              <Select onValueChange={field.onChange} defaultValue={field.value}>
+              <Select onValueChange={field.onChange} value={field.value}>
                 <SelectTrigger className="rounded-xl">
                   <SelectValue placeholder="Pilih Jenis Naskah" />
                 </SelectTrigger>
@@ -81,7 +81,7 @@ export function ComposerForm() {
             control={control}
             name="securityLevel"
             render={({ field }) => (
-              <Select onValueChange={field.onChange} defaultValue={field.value}>
+              <Select onValueChange={field.onChange} value={field.value}>
                 <SelectTrigger className="rounded-xl">
                   <SelectValue placeholder="Pilih Sifat" />
                 </SelectTrigger>
@@ -102,7 +102,7 @@ export function ComposerForm() {
             control={control}
             name="urgencyLevel"
             render={({ field }) => (
-              <Select onValueChange={field.onChange} defaultValue={field.value}>
+              <Select onValueChange={field.onChange} value={field.value}>
                 <SelectTrigger className="rounded-xl">
                   <SelectValue placeholder="Pilih Urgensi" />
                 </SelectTrigger>
