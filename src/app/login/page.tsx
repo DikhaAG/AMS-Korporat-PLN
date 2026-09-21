@@ -49,7 +49,7 @@ export default function LoginPage() {
         router.push("/");
       }
     } catch (err) {
-      setErrorMsg("Terjadi kesalahan sistem. Silakan coba lagi.");
+      setErrorMsg("Terjadi kesalahan sistem. Silakan coba lagi. " + err);
     }
   };
 
