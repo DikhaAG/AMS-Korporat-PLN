@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "postbuild": "tsx --env-file=.env scripts/seed-superadmin.ts",
+    "db:seed": "tsx scripts/seed-superadmin.ts",
+    "db:seed:roles": "tsx scripts/seed-roles.ts",
     "start": "next start",
     "lint": "eslint"
   },
