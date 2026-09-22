@@ -29,27 +29,57 @@ export default function LoginPage() {
     resolver: zodResolver(loginSchema),
   });
 
+  const [debugDetails, setDebugDetails] = useState<string | null>(null);
+
   const onSubmit = async (data: LoginForm) => {
     setErrorMsg("");
+    setDebugDetails(null);
+
+    const origin = typeof window !== "undefined" ? window.location.origin : "server";
+    console.group(`🔐 [Auth Login Attempt] ${new Date().toISOString()}`);
+    console.log("Email:", data.email);
+    console.log("Browser Origin:", origin);
+    console.log("App URL Env:", process.env.NEXT_PUBLIC_APP_URL);
 
     try {
       const result = await signIn.email({
         email: data.email,
         password: data.password,
         fetchOptions: {
+          onRequest: (ctx) => {
+            console.log("📤 [Auth Request]", ctx.url, ctx.method, ctx.headers);
+          },
+          onResponse: (ctx) => {
+            console.log("📥 [Auth Response]", ctx.response.status, ctx.response.statusText);
+          },
           onError: (ctx) => {
-            setErrorMsg(ctx.error.message || "Gagal masuk. Periksa kembali email dan password Anda.");
-          }
-        }
+            console.error("❌ [Auth onError Callback]", ctx.error);
+            const status = ctx.response?.status;
+            const message = ctx.error?.message || "Gagal masuk. Periksa kembali email dan password Anda.";
+            setErrorMsg(message);
+            setDebugDetails(
+              `Status: ${status || "N/A"} | Code: ${ctx.error?.status || "N/A"}\nMessage: ${message}\nDetails: ${JSON.stringify(ctx.error, null, 2)}`
+            );
+          },
+        },
       });
 
-      // better-auth doesn't automatically throw on failure if you use fetchOptions.onError, 
-      // but it will return an error object.
+      console.log("📊 [Auth Signin Result]:", result);
+      console.groupEnd();
+
       if (result.data) {
+        console.log("✅ Login success, redirecting...");
         router.push("/");
+      } else if (result.error) {
+        console.warn("⚠️ Signin returned error object:", result.error);
+        setErrorMsg(result.error.message || "Gagal masuk. Periksa email dan password.");
+        setDebugDetails(JSON.stringify(result.error, null, 2));
       }
-    } catch (err) {
-      setErrorMsg("Terjadi kesalahan sistem. Silakan coba lagi. " + err);
+    } catch (err: any) {
+      console.error("💥 [Auth Uncaught Exception]:", err);
+      console.groupEnd();
+      setErrorMsg("Terjadi kesalahan sistem. Silakan coba lagi.");
+      setDebugDetails(err?.stack || err?.message || String(err));
     }
   };
 
@@ -97,8 +127,14 @@ export default function LoginPage() {
             </div>
 
             {errorMsg && (
-              <div className="p-3 bg-red-50 text-red-600 border border-red-100 rounded-xl text-sm font-medium animate-in slide-in-from-top-1">
-                {errorMsg}
+              <div className="p-3 bg-red-50 text-red-600 border border-red-100 rounded-xl text-sm font-medium animate-in slide-in-from-top-1 space-y-2">
+                <p>{errorMsg}</p>
+                {debugDetails && (
+                  <details className="text-xs text-red-800/80 bg-red-100/50 p-2 rounded border border-red-200 cursor-pointer overflow-x-auto">
+                    <summary className="font-semibold select-none">Detail Teknis (Debug Info)</summary>
+                    <pre className="mt-2 font-mono whitespace-pre-wrap">{debugDetails}</pre>
+                  </details>
+                )}
               </div>
             )}
 

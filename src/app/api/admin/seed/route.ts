@@ -1,7 +1,7 @@
 import { NextResponse, NextRequest } from "next/server";
 import { db } from "@/db";
-import { user, orgPositions } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { user, account, orgPositions } from "@/db/schema";
+import { eq, sql, and } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +20,7 @@ async function handleSeed(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const providedSecret = searchParams.get("secret") || request.headers.get("x-seed-secret");
+    const forceReset = searchParams.get("force") === "true" || searchParams.get("reset") === "true";
     
     // Allowed secret keys
     const validSecret = process.env.ADMIN_SEED_SECRET || process.env.BETTER_AUTH_SECRET || "pln-ams-seed-2026";
@@ -45,8 +46,27 @@ async function handleSeed(request: NextRequest) {
     });
 
     if (existingSuperadmin) {
-      await db.update(user).set({ role: "admin" }).where(eq(user.email, superadminEmail));
-      log.push(`Superadmin (${superadminEmail}) exists: role updated to admin.`);
+      const userAccount = await db.query.account.findFirst({
+        where: eq(account.userId, existingSuperadmin.id),
+      });
+
+      if (forceReset || !userAccount) {
+        // If force reset or no account, delete and recreate cleanly with Better Auth
+        await db.delete(account).where(eq(account.userId, existingSuperadmin.id));
+        await db.delete(user).where(eq(user.id, existingSuperadmin.id));
+        await auth.api.signUpEmail({
+          body: {
+            email: superadminEmail,
+            password: superadminPassword,
+            name: "Super Administrator",
+          },
+        });
+        await db.update(user).set({ role: "admin" }).where(eq(user.email, superadminEmail));
+        log.push(`Superadmin (${superadminEmail}) recreated with fresh Better Auth account credentials.`);
+      } else {
+        await db.update(user).set({ role: "admin" }).where(eq(user.email, superadminEmail));
+        log.push(`Superadmin (${superadminEmail}) exists with valid account record: role ensured as admin.`);
+      }
     } else {
       await auth.api.signUpEmail({
         body: {
@@ -157,10 +177,31 @@ async function handleSeed(request: NextRequest) {
           .where(eq(user.email, u.email));
         log.push(`Created user: ${u.email}`);
       } else {
-        await db.update(user)
-          .set({ positionId: positions[u.posCode].id })
-          .where(eq(user.email, u.email));
-        log.push(`Updated user position: ${u.email}`);
+        const userAccount = await db.query.account.findFirst({
+          where: eq(account.userId, existing.id),
+        });
+
+        if (forceReset || !userAccount) {
+          // Recreate cleanly with Better Auth
+          await db.delete(account).where(eq(account.userId, existing.id));
+          await db.delete(user).where(eq(user.id, existing.id));
+          await auth.api.signUpEmail({
+            body: {
+              email: u.email,
+              password: "password123",
+              name: u.name,
+            },
+          });
+          await db.update(user)
+            .set({ positionId: positions[u.posCode].id })
+            .where(eq(user.email, u.email));
+          log.push(`User (${u.email}) recreated with fresh Better Auth account credentials.`);
+        } else {
+          await db.update(user)
+            .set({ positionId: positions[u.posCode].id })
+            .where(eq(user.email, u.email));
+          log.push(`User (${u.email}) exists with valid account: updated position.`);
+        }
       }
     }
 
