@@ -3,6 +3,8 @@ import { createTRPCRouter, protectedAdminProcedure } from "../trpc";
 import { user, orgPositions, documents, documentAuditTrails, systemSettings } from "@/db/schema";
 import { eq, sql, desc } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
+import { auth } from "@/lib/auth";
+import { createUserSchema } from "@/shared/schemas/user";
 
 export const adminRouter = createTRPCRouter({
   // ---- USERS ----
@@ -10,6 +12,84 @@ export const adminRouter = createTRPCRouter({
     .query(async ({ ctx }) => {
       const users = await ctx.db.select().from(user).orderBy(user.name);
       return users;
+    }),
+
+  createUser: protectedAdminProcedure
+    .input(createUserSchema)
+    .mutation(async ({ ctx, input }) => {
+      // 1. Check if email already exists
+      const existingEmail = await ctx.db.query.user.findFirst({
+        where: eq(user.email, input.email),
+      });
+      if (existingEmail) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "Email sudah terdaftar dalam sistem.",
+        });
+      }
+
+      // 2. Check NIP uniqueness if provided
+      if (input.nip && input.nip.trim() !== "") {
+        const existingNip = await ctx.db.query.user.findFirst({
+          where: eq(user.nip, input.nip.trim()),
+        });
+        if (existingNip) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "NIP sudah terdaftar untuk pengguna lain.",
+          });
+        }
+      }
+
+      // 3. Check position validity if assigned
+      const targetPosId = input.positionId && input.positionId.trim() !== "" ? input.positionId : null;
+      if (targetPosId) {
+        const pos = await ctx.db.query.orgPositions.findFirst({
+          where: eq(orgPositions.id, targetPosId),
+        });
+        if (!pos) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Jabatan struktural tidak ditemukan.",
+          });
+        }
+      }
+
+      // 4. Create user with credentials via Better Auth
+      try {
+        await auth.api.signUpEmail({
+          body: {
+            email: input.email,
+            password: input.password,
+            name: input.name,
+          },
+        });
+      } catch (authError: any) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: authError.message || "Gagal membuat akun autentikasi pengguna.",
+        });
+      }
+
+      // 5. Update user extensions (NIP, role, position)
+      const [createdUser] = await ctx.db
+        .update(user)
+        .set({
+          nip: input.nip && input.nip.trim() !== "" ? input.nip.trim() : null,
+          role: input.role,
+          positionId: targetPosId,
+        })
+        .where(eq(user.email, input.email))
+        .returning();
+
+      if (!createdUser) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Pengguna dibuat tetapi gagal memperbarui profil tambahan.",
+        });
+      }
+
+      return createdUser;
     }),
 
   updateUserRole: protectedAdminProcedure

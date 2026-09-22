@@ -3,14 +3,17 @@
 import { useState, useMemo } from "react"
 import { useTRPC } from "@/trpc/client"
 import { useQuery } from "@tanstack/react-query"
-import { Users, Search, Filter } from "lucide-react"
+import { Users, Search, UserPlus } from "lucide-react"
 import { UserSidebar, UserItem } from "@/components/admin/user-sidebar"
+import { CreateUserDialog } from "@/components/admin/create-user-dialog"
 import { DataTable } from "@/components/ui/data-table"
+import { Button } from "@/components/ui/button"
 import { getColumns } from "./columns"
 
 export default function UsersAdminPage() {
   const trpc = useTRPC()
   const [selectedUser, setSelectedUser] = useState<UserItem | null>(null)
+  const [isCreateOpen, setIsCreateOpen] = useState(false)
   
   // Filter States
   const [searchQuery, setSearchQuery] = useState("")
@@ -24,7 +27,8 @@ export default function UsersAdminPage() {
     if (!users) return []
     return users.filter(user => {
       const matchesSearch = user.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                            user.email.toLowerCase().includes(searchQuery.toLowerCase())
+                            user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                            (user.nip && user.nip.toLowerCase().includes(searchQuery.toLowerCase()))
       const matchesRole = roleFilter === "all" || user.role === roleFilter
       return matchesSearch && matchesRole
     })
@@ -50,16 +54,16 @@ export default function UsersAdminPage() {
           </p>
         </div>
         
-        {/* 2026 UI Search & Filters */}
+        {/* 2026 UI Search, Filters & Action Button */}
         <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
           {/* Search Bar */}
-          <div className="relative w-full sm:w-72 group">
+          <div className="relative w-full sm:w-64 group">
             <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none text-muted-foreground group-focus-within:text-primary transition-colors">
               <Search className="w-4 h-4" />
             </div>
             <input
               type="text"
-              placeholder="Cari nama atau email..."
+              placeholder="Cari nama, NIP, email..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full h-11 pl-10 pr-4 bg-white/60 dark:bg-neutral-900/60 backdrop-blur-xl border border-black/5 dark:border-white/10 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all shadow-sm"
@@ -72,7 +76,7 @@ export default function UsersAdminPage() {
               <button
                 key={role}
                 onClick={() => setRoleFilter(role)}
-                className={`px-4 py-2 rounded-full text-xs font-bold tracking-widest uppercase transition-all duration-300 ease-[var(--ease-fluid)] ${
+                className={`px-3.5 py-2 rounded-full text-xs font-bold tracking-widest uppercase transition-all duration-300 ease-[var(--ease-fluid)] ${
                   roleFilter === role 
                     ? "bg-primary text-primary-foreground shadow-md" 
                     : "text-muted-foreground hover:bg-black/5 dark:hover:bg-white/10"
@@ -82,6 +86,15 @@ export default function UsersAdminPage() {
               </button>
             ))}
           </div>
+
+          {/* Create User Button */}
+          <Button
+            onClick={() => setIsCreateOpen(true)}
+            className="w-full sm:w-auto h-11 px-5 rounded-full bg-primary text-primary-foreground font-semibold shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all flex items-center gap-2 shrink-0"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>Tambah Pengguna</span>
+          </Button>
         </div>
       </div>
 
@@ -108,6 +121,7 @@ export default function UsersAdminPage() {
       </div>
 
       <UserSidebar user={selectedUser} onClose={() => setSelectedUser(null)} />
+      <CreateUserDialog open={isCreateOpen} onOpenChange={setIsCreateOpen} />
     </div>
   )
 }

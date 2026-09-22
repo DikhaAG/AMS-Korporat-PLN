@@ -12,12 +12,13 @@ import {
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Shield, ShieldAlert, Network, Briefcase, Mail } from "lucide-react"
+import { Shield, ShieldAlert, Network, Briefcase, Mail, BadgeCheck } from "lucide-react"
 
 export type UserItem = {
   id: string
   name: string
   email: string
+  nip?: string | null
   role: string | null
   positionId: string | null
   image?: string | null
@@ -110,9 +111,17 @@ export function UserSidebar({
               </Avatar>
               <div className="flex-1 min-w-0">
                 <SheetTitle className="text-2xl font-bold tracking-tight truncate">{user?.name}</SheetTitle>
-                <div className="flex items-center gap-2 mt-1 text-muted-foreground text-sm truncate">
-                  <Mail className="w-3.5 h-3.5 shrink-0" />
-                  <span className="truncate">{user?.email}</span>
+                <div className="flex flex-col gap-1 mt-1 text-muted-foreground text-xs">
+                  <div className="flex items-center gap-1.5 truncate">
+                    <Mail className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">{user?.email}</span>
+                  </div>
+                  {user?.nip && (
+                    <div className="flex items-center gap-1.5 font-mono text-primary font-semibold">
+                      <BadgeCheck className="w-3.5 h-3.5 shrink-0" />
+                      <span>NIP: {user.nip}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
