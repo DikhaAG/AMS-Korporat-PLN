@@ -20,6 +20,7 @@ export const metadata: Metadata = {
 
 import { TRPCReactProvider } from "@/trpc/client";
 import { NuqsAdapter } from 'nuqs/adapters/next/app'
+import { Toaster } from "sonner";
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
@@ -29,9 +30,13 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col font-sans">
         <NuqsAdapter>
-          <TRPCReactProvider>{children}</TRPCReactProvider>
+          <TRPCReactProvider>
+            {children}
+            <Toaster position="top-right" richColors closeButton />
+          </TRPCReactProvider>
         </NuqsAdapter>
       </body>
     </html>
   );
 }
+
