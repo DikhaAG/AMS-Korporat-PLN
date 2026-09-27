@@ -1,10 +1,11 @@
 import { z } from "zod";
 import { createTRPCRouter, protectedAdminProcedure } from "../trpc";
-import { user, orgPositions, documents, documentAuditTrails, systemSettings } from "@/db/schema";
-import { eq, sql, desc } from "drizzle-orm";
+import { user, session, account, positionDelegations, orgPositions, documents, documentAuditTrails, systemSettings } from "@/db/schema";
+import { eq, ne, and, sql, desc } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { auth } from "@/lib/auth";
-import { createUserSchema } from "@/shared/schemas/user";
+import { hashPassword } from "better-auth/crypto";
+import { createUserSchema, updateUserSchema, deleteUserSchema } from "@/shared/schemas/user";
 
 export const adminRouter = createTRPCRouter({
   // ---- USERS ----
@@ -90,6 +91,154 @@ export const adminRouter = createTRPCRouter({
       }
 
       return createdUser;
+    }),
+
+  updateUser: protectedAdminProcedure
+    .input(updateUserSchema)
+    .mutation(async ({ ctx, input }) => {
+      // 1. Verify target user exists
+      const existingUser = await ctx.db.query.user.findFirst({
+        where: eq(user.id, input.id),
+      });
+      if (!existingUser) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Pengguna tidak ditemukan." });
+      }
+
+      // 2. Check email uniqueness if modified
+      if (input.email !== existingUser.email) {
+        const duplicateEmail = await ctx.db.query.user.findFirst({
+          where: and(eq(user.email, input.email), ne(user.id, input.id)),
+        });
+        if (duplicateEmail) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "Email sudah digunakan oleh pengguna lain.",
+          });
+        }
+      }
+
+      // 3. Check NIP uniqueness if modified
+      const cleanNip = input.nip && input.nip.trim() !== "" ? input.nip.trim() : null;
+      if (cleanNip && cleanNip !== existingUser.nip) {
+        const duplicateNip = await ctx.db.query.user.findFirst({
+          where: and(eq(user.nip, cleanNip), ne(user.id, input.id)),
+        });
+        if (duplicateNip) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "NIP sudah digunakan oleh pengguna lain.",
+          });
+        }
+      }
+
+      // 4. Check position validity if assigned
+      const targetPosId = input.positionId && input.positionId.trim() !== "" ? input.positionId : null;
+      if (targetPosId) {
+        const pos = await ctx.db.query.orgPositions.findFirst({
+          where: eq(orgPositions.id, targetPosId),
+        });
+        if (!pos) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Jabatan struktural tidak ditemukan.",
+          });
+        }
+      }
+
+      // 5. Update user profile details in database
+      const [updatedUser] = await ctx.db
+        .update(user)
+        .set({
+          name: input.name,
+          email: input.email,
+          nip: cleanNip,
+          role: input.role,
+          positionId: targetPosId,
+          updatedAt: new Date(),
+        })
+        .where(eq(user.id, input.id))
+        .returning();
+
+      // 6. If new password provided, update credentials in account table
+      if (input.newPassword && input.newPassword.trim() !== "") {
+        const hashedPassword = await hashPassword(input.newPassword.trim());
+        const existingAccount = await ctx.db.query.account.findFirst({
+          where: and(eq(account.userId, input.id), eq(account.providerId, "credential")),
+        });
+
+        if (existingAccount) {
+          await ctx.db
+            .update(account)
+            .set({ password: hashedPassword, updatedAt: new Date() })
+            .where(eq(account.id, existingAccount.id));
+        } else {
+          await ctx.db.insert(account).values({
+            id: crypto.randomUUID(),
+            accountId: input.id,
+            providerId: "credential",
+            userId: input.id,
+            password: hashedPassword,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+        }
+      }
+
+      return updatedUser;
+    }),
+
+  deleteUser: protectedAdminProcedure
+    .input(deleteUserSchema)
+    .mutation(async ({ ctx, input }) => {
+      // 1. Prevent deleting self
+      if (input.id === ctx.user.id) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Anda tidak dapat menghapus akun Anda sendiri.",
+        });
+      }
+
+      // 2. Prevent deleting the last superadmin
+      const targetUser = await ctx.db.query.user.findFirst({
+        where: eq(user.id, input.id),
+      });
+      if (!targetUser) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Pengguna tidak ditemukan." });
+      }
+
+      if (targetUser.role === "admin") {
+        const adminCount = await ctx.db
+          .select({ id: user.id })
+          .from(user)
+          .where(eq(user.role, "admin"));
+        if (adminCount.length <= 1) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Tidak dapat menghapus Superadmin terakhir dalam sistem.",
+          });
+        }
+      }
+
+      // 3. Check for active delegations
+      const delegations = await ctx.db
+        .select({ id: positionDelegations.id })
+        .from(positionDelegations)
+        .where(eq(positionDelegations.delegateeUserId, input.id))
+        .limit(1);
+      if (delegations.length > 0) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Pengguna memiliki penugasan delegasi aktif. Batalkan delegasi terlebih dahulu.",
+        });
+      }
+
+      // 4. Safe cascade deletion in database transaction
+      return await ctx.db.transaction(async (tx) => {
+        await tx.delete(session).where(eq(session.userId, input.id));
+        await tx.delete(account).where(eq(account.userId, input.id));
+        const [deleted] = await tx.delete(user).where(eq(user.id, input.id)).returning();
+        return { success: true, deletedUser: deleted };
+      });
     }),
 
   updateUserRole: protectedAdminProcedure

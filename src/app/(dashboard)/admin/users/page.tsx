@@ -2,17 +2,30 @@
 
 import { useState, useMemo } from "react"
 import { useTRPC } from "@/trpc/client"
-import { useQuery } from "@tanstack/react-query"
-import { Users, Search, UserPlus } from "lucide-react"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
+import { Users, Search, UserPlus, Trash2, AlertTriangle, Loader2 } from "lucide-react"
 import { UserSidebar, UserItem } from "@/components/admin/user-sidebar"
 import { CreateUserDialog } from "@/components/admin/create-user-dialog"
 import { DataTable } from "@/components/ui/data-table"
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog"
 import { getColumns } from "./columns"
 
 export default function UsersAdminPage() {
   const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const [selectedUser, setSelectedUser] = useState<UserItem | null>(null)
+  const [userToDelete, setUserToDelete] = useState<UserItem | null>(null)
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   
   // Filter States
@@ -21,6 +34,30 @@ export default function UsersAdminPage() {
   
   const { data: users, isLoading, error } = useQuery(trpc.admin.getUsers.queryOptions())
   const { data: positions } = useQuery(trpc.admin.getPositions.queryOptions())
+
+  // Delete User Mutation
+  const deleteUserMutation = useMutation(
+    trpc.admin.deleteUser.mutationOptions({
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: [["admin", "getUsers"]] })
+        queryClient.invalidateQueries({ queryKey: [["admin", "getUsersByPosition"]] })
+        toast.success("Pengguna Dihapus", {
+          description: `Akun ${userToDelete?.name} telah dihapus secara permanen dari sistem.`,
+        })
+        setUserToDelete(null)
+      },
+      onError: (err) => {
+        toast.error("Gagal Menghapus Pengguna", {
+          description: err.message || "Terjadi kesalahan saat menghapus pengguna.",
+        })
+      },
+    })
+  )
+
+  const handleDeleteConfirm = () => {
+    if (!userToDelete) return
+    deleteUserMutation.mutate({ id: userToDelete.id })
+  }
 
   // Filter Logic
   const filteredUsers = useMemo(() => {
@@ -34,8 +71,16 @@ export default function UsersAdminPage() {
     })
   }, [users, searchQuery, roleFilter])
 
-  // Create columns with the onEdit callback and positions map
-  const columns = useMemo(() => getColumns((user) => setSelectedUser(user), positions || []), [positions])
+  // Create columns with onEdit, onDelete callback, and positions map
+  const columns = useMemo(
+    () =>
+      getColumns(
+        (user) => setSelectedUser(user),
+        (user) => setUserToDelete(user),
+        positions || []
+      ),
+    [positions]
+  )
 
   return (
     <div className="flex flex-col min-h-full bg-transparent w-full max-w-[1600px] mx-auto pb-12 pt-4">
@@ -50,7 +95,7 @@ export default function UsersAdminPage() {
             Manajemen Pengguna
           </h1>
           <p className="text-muted-foreground text-sm max-w-xl">
-            Kelola akses, peran, dan delegasi jabatan struktural pegawai dalam sistem.
+            Kelola akses, data identitas, peran PBAC, dan kredensial pegawai dalam sistem AMS Korporat.
           </p>
         </div>
         
@@ -120,8 +165,59 @@ export default function UsersAdminPage() {
         </div>
       </div>
 
-      <UserSidebar user={selectedUser} onClose={() => setSelectedUser(null)} />
+      {/* User Edit & Detail Sheet */}
+      <UserSidebar 
+        user={selectedUser} 
+        onClose={() => setSelectedUser(null)} 
+        onDeleteRequest={(user) => {
+          setSelectedUser(null)
+          setUserToDelete(user)
+        }}
+      />
+
+      {/* Create User Dialog */}
       <CreateUserDialog open={isCreateOpen} onOpenChange={setIsCreateOpen} />
+
+      {/* Delete User Confirmation Dialog */}
+      <AlertDialog open={!!userToDelete} onOpenChange={(open) => !open && setUserToDelete(null)}>
+        <AlertDialogContent className="sm:max-w-md rounded-3xl p-6 bg-white/95 dark:bg-neutral-950/95 backdrop-blur-2xl border border-black/10 dark:border-white/10 shadow-2xl">
+          <AlertDialogHeader className="space-y-3 text-left">
+            <div className="w-12 h-12 rounded-2xl bg-destructive/10 text-destructive flex items-center justify-center">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <AlertDialogTitle className="text-xl font-bold text-foreground">
+              Konfirmasi Hapus Pengguna
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-xs text-muted-foreground leading-relaxed">
+              Apakah Anda yakin ingin menghapus akun <span className="font-bold text-foreground">{userToDelete?.name}</span> ({userToDelete?.email})?
+              Tindakan ini akan menghapus sesi login dan kredensial secara permanen dari sistem.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <AlertDialogFooter className="mt-4 pt-4 border-t border-black/5 dark:border-white/5 flex items-center justify-end gap-2.5">
+            <AlertDialogCancel disabled={deleteUserMutation.isPending} className="rounded-xl h-10 px-4 text-xs font-semibold">
+              Batal
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteConfirm}
+              disabled={deleteUserMutation.isPending}
+              className="rounded-xl h-10 px-5 text-xs font-semibold bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-md flex items-center gap-1.5"
+            >
+              {deleteUserMutation.isPending ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Menghapus...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Hapus Permanen
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

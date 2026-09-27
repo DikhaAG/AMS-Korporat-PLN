@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useTRPC } from "@/trpc/client"
+import { toast } from "sonner"
 import { 
   CheckCircle2, 
   RotateCcw, 
@@ -26,14 +27,38 @@ interface DocumentReviewCardProps {
 export function DocumentReviewCard({ documentId, isSigner, onSuccess }: DocumentReviewCardProps) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
-  const [selectedAction, setSelectedAction] = useState<"APPROVED" | "REVISED" | "REJECTED" | null>(null)
+  const [selectedAction, setSelectedAction] = useState<"APPROVED" | "REVISED" | "REJECTED">("APPROVED")
 
   const reviewMutation = useMutation(
     trpc.document.reviewDocument.mutationOptions({
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: [["document", "getDocument"]] })
-        queryClient.invalidateQueries({ queryKey: [["document", "getDocuments"]] })
+      onSuccess: (updatedDoc) => {
+        if (selectedAction === "APPROVED") {
+          if (isSigner) {
+            toast.success("Naskah Berhasil Ditandatangani (TTE)!", {
+              description: `Nomor Resmi: ${updatedDoc.documentNumber || "Diterbitkan"}`
+            })
+          } else {
+            toast.success("Naskah Berhasil Disetujui & Diparaf!", {
+              description: "Naskah diteruskan ke jenjang atasan berikutnya."
+            })
+          }
+        } else if (selectedAction === "REVISED") {
+          toast.warning("Permintaan Revisi Terkirim", {
+            description: "Naskah dikembalikan ke pembuat konsep untuk perbaikan."
+          })
+        } else if (selectedAction === "REJECTED") {
+          toast.error("Naskah Ditolak", {
+            description: "Status naskah telah diubah menjadi ditolak."
+          })
+        }
+
+        queryClient.invalidateQueries({ queryKey: [["document"]] })
         if (onSuccess) onSuccess()
+      },
+      onError: (err) => {
+        toast.error("Gagal Memproses Reviu", {
+          description: err.message || "Terjadi kesalahan saat memproses paraf/pengesahan."
+        })
       }
     })
   )
@@ -53,7 +78,10 @@ export function DocumentReviewCard({ documentId, isSigner, onSuccess }: Document
   }
 
   const onSubmit = (values: DocumentReviewActionInput) => {
-    reviewMutation.mutate(values)
+    reviewMutation.mutate({
+      ...values,
+      actionStatus: selectedAction,
+    })
   }
 
   return (

@@ -143,25 +143,23 @@ export const documentRouter = createTRPCRouter({
           });
         }
 
-        // Logic for final signer vs regular reviewer could be complex
-        // For simplicity, we assume if APPROVED by the sender's parent, it becomes final
-        
+        // 1. Determine active user's position
+        const [position] = await tx
+          .select()
+          .from(orgPositions)
+          .where(eq(orgPositions.id, ctx.activePositionId));
+
         let newStatus: "DRAFT" | "IN_REVIEW" | "NEEDS_REVISION" | "APPROVED" | "SIGNED_AND_PUBLISHED" | "REJECTED" | "CANCELLED" = doc.currentStatus;
+        
         if (input.actionStatus === "REJECTED") {
           newStatus = "REJECTED";
         } else if (input.actionStatus === "REVISED") {
           newStatus = "NEEDS_REVISION";
         } else if (input.actionStatus === "APPROVED") {
-          // Check if this position is a signer
-          const [position] = await tx
-            .select()
-            .from(orgPositions)
-            .where(eq(orgPositions.id, ctx.activePositionId));
-            
           if (position && position.isSigner) {
             newStatus = "SIGNED_AND_PUBLISHED";
             
-            // Atomic Numbering Logic
+            // Atomic Numbering Logic (ADR-004)
             const year = new Date().getFullYear();
             const classCode = doc.classificationCode || "UMUM";
             
@@ -194,11 +192,43 @@ export const documentRouter = createTRPCRouter({
             // Enqueue PDF generation background job
             const { getBoss } = await import('@/lib/queue');
             const boss = await getBoss();
-            // In pg-boss, jobs can be transactional if we pass the db connection, but doing it here is fine since the tx completes right after.
             await boss.send('generate-pdf', { documentId: input.documentId });
           } else {
-            // Wait for next approval step
-            newStatus = "IN_REVIEW"; 
+            // Verifier Paraf: Remains IN_REVIEW and advances UP to superior
+            newStatus = "IN_REVIEW";
+            
+            if (position?.parentId) {
+              const [parentPos] = await tx
+                .select()
+                .from(orgPositions)
+                .where(eq(orgPositions.id, position.parentId));
+
+              const parentRole = parentPos?.isSigner ? "FINAL_SIGNER" : "VERIFIER_PARAF";
+
+              // Check if parent already has an approval record
+              const [existingParentApproval] = await tx
+                .select()
+                .from(documentApprovals)
+                .where(and(
+                  eq(documentApprovals.documentId, doc.id),
+                  eq(documentApprovals.reviewerPositionId, position.parentId)
+                ));
+
+              if (!existingParentApproval) {
+                await tx.insert(documentApprovals).values({
+                  documentId: doc.id,
+                  reviewerPositionId: position.parentId,
+                  stepOrder: 2,
+                  approvalRole: parentRole,
+                  actionStatus: "PENDING",
+                });
+              } else if (existingParentApproval.actionStatus !== "APPROVED") {
+                await tx
+                  .update(documentApprovals)
+                  .set({ actionStatus: "PENDING" })
+                  .where(eq(documentApprovals.id, existingParentApproval.id));
+              }
+            }
           }
         }
 
@@ -211,19 +241,45 @@ export const documentRouter = createTRPCRouter({
           .where(eq(documents.id, input.documentId))
           .returning();
 
-        // Record Approval Action
-        await tx.insert(documentApprovals).values({
-          documentId: doc.id,
-          reviewerPositionId: ctx.activePositionId,
-          actualReviewerUserId: ctx.user.id,
-          stepOrder: 1, // Simplified for now
-          approvalRole: newStatus === "SIGNED_AND_PUBLISHED" ? "FINAL_SIGNER" : "VERIFIER_PARAF",
-          actionStatus: input.actionStatus,
-          notes: input.notes,
-          actedAt: new Date(),
-        });
+        // 2. Update ALL existing pending approvals for the active position to the new action status
+        const pendingApprovals = await tx
+          .select()
+          .from(documentApprovals)
+          .where(and(
+            eq(documentApprovals.documentId, doc.id),
+            eq(documentApprovals.reviewerPositionId, ctx.activePositionId),
+            eq(documentApprovals.actionStatus, "PENDING")
+          ));
 
-        // Record Audit Trail
+        if (pendingApprovals.length > 0) {
+          await tx
+            .update(documentApprovals)
+            .set({
+              actionStatus: input.actionStatus,
+              actualReviewerUserId: ctx.user.id,
+              notes: input.notes || null,
+              actedAt: new Date(),
+            })
+            .where(and(
+              eq(documentApprovals.documentId, doc.id),
+              eq(documentApprovals.reviewerPositionId, ctx.activePositionId),
+              eq(documentApprovals.actionStatus, "PENDING")
+            ));
+        } else {
+          // If no pending record was found, insert a completed approval entry
+          await tx.insert(documentApprovals).values({
+            documentId: doc.id,
+            reviewerPositionId: ctx.activePositionId,
+            actualReviewerUserId: ctx.user.id,
+            stepOrder: 1,
+            approvalRole: position?.isSigner ? "FINAL_SIGNER" : "VERIFIER_PARAF",
+            actionStatus: input.actionStatus,
+            notes: input.notes || null,
+            actedAt: new Date(),
+          });
+        }
+
+        // 3. Record Audit Trail
         await tx.insert(documentAuditTrails).values({
           documentId: doc.id,
           actorUserId: ctx.user.id,

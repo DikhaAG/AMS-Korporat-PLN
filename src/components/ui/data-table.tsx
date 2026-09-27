@@ -25,6 +25,7 @@ interface DataTableProps<TData, TValue> {
   page: number
   onPageChange: (page: number) => void
   isLoading?: boolean
+  onRowClick?: (row: TData) => void
 }
 
 export function DataTable<TData, TValue>({
@@ -34,6 +35,7 @@ export function DataTable<TData, TValue>({
   page,
   onPageChange,
   isLoading,
+  onRowClick,
 }: DataTableProps<TData, TValue>) {
   const table = useReactTable({
     data,
@@ -81,7 +83,19 @@ export function DataTable<TData, TValue>({
                 <TableRow
                   key={row.id}
                   data-state={row.getIsSelected() && "selected"}
-                  className="hover:bg-muted/30 transition-colors duration-300 border-border/50 group whitespace-nowrap"
+                  onClick={(e) => {
+                    // Ignore clicks on buttons, links, inputs, checkboxes
+                    const target = e.target as HTMLElement
+                    if (target.closest('button') || target.closest('a') || target.closest('input') || target.closest('[role="checkbox"]')) {
+                      return
+                    }
+                    if (onRowClick) {
+                      onRowClick(row.original)
+                    }
+                  }}
+                  className={`transition-colors duration-300 border-border/50 group whitespace-nowrap ${
+                    onRowClick ? "cursor-pointer hover:bg-[#145f74]/5" : "hover:bg-muted/30"
+                  }`}
                 >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id} className="py-4 px-4">
