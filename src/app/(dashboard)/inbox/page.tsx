@@ -17,12 +17,17 @@ function InboxContent() {
   const [page, setPage] = useQueryState('page', parseAsInteger.withDefault(1))
   const [search] = useQueryState('search', parseAsString.withDefault(''))
   const [status] = useQueryState('status', parseAsString)
+  const [docType] = useQueryState('docType', parseAsString)
+  const [view] = useQueryState('view', parseAsString.withDefault('inbox'))
+  const [type] = useQueryState('type', parseAsString.withDefault('INBOX'))
   const [previewId, setPreviewId] = useQueryState('previewId', parseAsString)
 
   const queryOptions = {
     page,
     limit: 10,
-    type: "INBOX" as const,
+    type: (type as any) || "INBOX",
+    view: view || undefined,
+    ...(docType ? { documentType: docType as any } : {}),
     ...(search ? { search } : {}),
     ...(status ? { status: status as any } : {}),
   };
@@ -38,21 +43,126 @@ function InboxContent() {
     return createColumns((doc) => handleOpenPreview(doc))
   }, [])
 
+  // Dynamic Header Presentation based on active view and document type
+  const headerInfo = useMemo(() => {
+    if (view === "dispositions-sent" || type === "DISPOSITIONS_SENT") {
+      return {
+        title: "Surat Masuk: Terkirim",
+        subtitle: "Riwayat tindak lanjut dan delegasi disposisi yang telah Anda teruskan ke bawahan.",
+        badge: "Disposisi Saya",
+      }
+    }
+    if (docType === "OUTGOING_LETTER") {
+      if (view === "persetujuan") {
+        return {
+          title: "Surat Keluar: Persetujuan",
+          subtitle: "Antrean surat keluar yang menunggu pemeriksaan paraf atau penandatanganan elektronik (TTE) Anda.",
+          badge: "Butuh Paraf/TTE",
+        }
+      }
+      if (view === "konsep") {
+        return {
+          title: "Surat Keluar: Konsep",
+          subtitle: "Konsep draf surat keluar yang sedang dirancang atau memerlukan perbaikan revisi.",
+          badge: "Draf Konsep",
+        }
+      }
+      if (view === "terkirim") {
+        return {
+          title: "Surat Keluar: Terkirim",
+          subtitle: "Arsip surat keluar resmi yang telah disahkan (TTE) dan terbit ber-Nomor.",
+          badge: "Sah & Terbit",
+        }
+      }
+      if (view === "dibatalkan") {
+        return {
+          title: "Surat Keluar: Dibatalkan",
+          subtitle: "Arsip surat keluar yang ditolak atau dibatalkan oleh pihak pembuat.",
+          badge: "Ditolak / Batal",
+        }
+      }
+      return {
+        title: "Surat Keluar: Telusuri Arsip",
+        subtitle: "Pencarian dan pemantauan menyeluruh seluruh arsip surat keluar unit kerja.",
+        badge: "Arsip Lengkap",
+      }
+    }
+
+    if (docType === "DINAS_NOTE") {
+      if (view === "persetujuan") {
+        return {
+          title: "Nota Dinas: Persetujuan",
+          subtitle: "Antrean nota dinas internal yang menunggu pemeriksaan paraf atau pengesahan TTE Anda.",
+          badge: "Butuh Paraf/TTE",
+        }
+      }
+      if (view === "konsep") {
+        return {
+          title: "Nota Dinas: Konsep",
+          subtitle: "Konsep draf nota dinas internal yang sedang dirancang tim Anda.",
+          badge: "Draf Konsep",
+        }
+      }
+      if (view === "terkirim") {
+        return {
+          title: "Nota Dinas: Terkirim",
+          subtitle: "Nota dinas internal yang telah disahkan dan terdistribusi ke unit penerima.",
+          badge: "Sah & Terbit",
+        }
+      }
+      if (view === "dibatalkan") {
+        return {
+          title: "Nota Dinas: Dibatalkan",
+          subtitle: "Arsip nota dinas internal yang ditolak atau dibatalkan.",
+          badge: "Ditolak / Batal",
+        }
+      }
+      if (view === "telusuri") {
+        return {
+          title: "Nota Dinas: Telusuri Arsip",
+          subtitle: "Pencarian dan pemantauan seluruh arsip nota dinas internal.",
+          badge: "Arsip Lengkap",
+        }
+      }
+      return {
+        title: "Nota Dinas Masuk",
+        subtitle: "Kotak penerimaan nota dinas internal dari unit/bidang kerja lain.",
+        badge: "Internal PLN",
+      }
+    }
+
+    if (docType === "CIRCULAR_LETTER" || view?.startsWith("gabungan")) {
+      return {
+        title: "Naskah Dinas Gabungan",
+        subtitle: "Paket persuratan dinas gabungan, surat edaran, dan surat penugasan terpadu.",
+        badge: "Naskah Gabungan",
+      }
+    }
+
+    return {
+      title: "Inbox Nota Dinas & Surat Masuk",
+      subtitle: "Pusat penerimaan naskah dinas korporat. Klik baris naskah untuk pratinjau cepat (Slide-Over Drawer) dan persetujuan / paraf langsung.",
+      badge: `${data?.totalCount || 0} Naskah`,
+    }
+  }, [view, docType, type, data?.totalCount])
+
   return (
     <div className="flex flex-col h-full bg-transparent w-full max-w-[1600px] mx-auto">
       <div className="flex-1 overflow-auto py-8 lg:py-12 px-2">
         
         {/* Vanguard Toolbar */}
-        <div className="mb-10 flex flex-col xl:flex-row items-start xl:items-center justify-between gap-6">
+        <div className="mb-8 flex flex-col xl:flex-row items-start xl:items-center justify-between gap-6">
           <div>
-            <h1 className="text-3xl lg:text-4xl font-extrabold tracking-tight text-foreground flex items-center gap-4">
-              Inbox Nota Dinas
-              <span className="bg-[#145f74]/10 text-[#145f74] text-sm px-3 py-1 rounded-full font-bold">
-                {data?.totalCount || 0} Naskah
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-foreground">
+                {headerInfo.title}
+              </h1>
+              <span className="bg-[#145f74]/10 text-[#145f74] dark:bg-[#145f74]/30 dark:text-cyan-300 text-xs px-3 py-1 rounded-full font-bold">
+                {headerInfo.badge}
               </span>
-            </h1>
-            <p className="text-muted-foreground mt-2 text-sm max-w-xl">
-              Pusat penerimaan naskah dinas. Klik naskah untuk pratinjau cepat (Slide-Over Drawer) dan persetujuan / paraf langsung.
+            </div>
+            <p className="text-muted-foreground mt-1.5 text-xs sm:text-sm max-w-2xl leading-relaxed">
+              {headerInfo.subtitle}
             </p>
           </div>
         </div>

@@ -10,7 +10,7 @@ import {
   documentRecipients,
   documentCounters
 } from "@/db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, inArray } from "drizzle-orm";
 import { 
   createDocumentDraftSchema, 
   documentReviewActionSchema,
@@ -299,11 +299,55 @@ export const documentRouter = createTRPCRouter({
       const offset = (input.page - 1) * input.limit;
       const conditions = [];
 
-      // If OUTBOX, show documents sent by the active position.
-      // If INBOX, check pending reviews, final recipients, or explicitly forwarded dispositions.
-      if (input.type === "OUTBOX") {
+      // Determine main scope based on input.view and input.type
+      if (input.view === "dispositions-sent" || input.type === "DISPOSITIONS_SENT") {
+        // Disposisi yang dikirimkan oleh posisi aktif
+        conditions.push(sql`
+          EXISTS (
+            SELECT 1 FROM ${dispositions} dsp
+            WHERE dsp.document_id = ${documents.id}
+            AND dsp.from_position_id = ${ctx.activePositionId}
+          )
+        `);
+      } else if (input.view === "persetujuan") {
+        // Antrean naskah yang menunggu reviu/paraf/TTE posisi aktif
+        conditions.push(sql`
+          EXISTS (
+            SELECT 1 FROM ${documentApprovals} da
+            WHERE da.document_id = ${documents.id}
+            AND da.reviewer_position_id = ${ctx.activePositionId}
+            AND da.action_status = 'PENDING'
+          )
+          AND ${documents.currentStatus} = 'IN_REVIEW'
+        `);
+      } else if (input.view === "konsep") {
+        // Konsep draf milik posisi aktif
         conditions.push(eq(documents.senderPositionId, ctx.activePositionId));
-      } else if (input.type === "INBOX") {
+        conditions.push(inArray(documents.currentStatus, ["DRAFT", "NEEDS_REVISION"]));
+      } else if (input.view === "dibatalkan") {
+        // Naskah ditolak / dibatalkan milik posisi aktif
+        conditions.push(eq(documents.senderPositionId, ctx.activePositionId));
+        conditions.push(inArray(documents.currentStatus, ["REJECTED", "CANCELLED"]));
+      } else if (input.view === "terkirim") {
+        if (input.type === "INBOX") {
+          // Surat masuk yang sudah didisposisikan
+          conditions.push(sql`
+            EXISTS (
+              SELECT 1 FROM ${dispositions} dsp
+              WHERE dsp.document_id = ${documents.id}
+              AND dsp.from_position_id = ${ctx.activePositionId}
+            )
+          `);
+        } else {
+          // Surat keluar / nota dinas terbit sah dari posisi aktif
+          conditions.push(eq(documents.senderPositionId, ctx.activePositionId));
+          conditions.push(eq(documents.currentStatus, "SIGNED_AND_PUBLISHED"));
+        }
+      } else if (input.view === "telusuri" || input.type === "OUTBOX") {
+        // Seluruh arsip surat keluar / nota dinas dari posisi aktif
+        conditions.push(eq(documents.senderPositionId, ctx.activePositionId));
+      } else {
+        // Default INBOX: Naskah masuk (pending review, recipient resmi, atau penerima disposisi)
         conditions.push(sql`
           EXISTS (
             SELECT 1 FROM ${documentApprovals} da
@@ -325,10 +369,19 @@ export const documentRouter = createTRPCRouter({
         `);
       }
 
-      if (input.status) {
+      // Filter by document type if specified (e.g. DINAS_NOTE, OUTGOING_LETTER)
+      if (input.documentType) {
+        conditions.push(eq(documents.documentType, input.documentType));
+      }
+
+      // Filter by single status or multiple statuses if specified
+      if (input.statuses && input.statuses.length > 0) {
+        conditions.push(inArray(documents.currentStatus, input.statuses));
+      } else if (input.status) {
         conditions.push(eq(documents.currentStatus, input.status));
       }
 
+      // Filter by search keyword (subject, documentNumber, agendaNumber)
       if (input.search) {
         conditions.push(
           sql`(${documents.subject} ILIKE ${'%' + input.search + '%'} 
@@ -371,6 +424,88 @@ export const documentRouter = createTRPCRouter({
         items,
         totalCount,
         pageCount,
+      };
+    }),
+
+  getNavCounters: protectedPositionProcedure
+    .query(async ({ ctx }) => {
+      // 1. Pending Reviews (Persetujuan / Paraf / TTE)
+      const [pendingReviews] = await ctx.db
+        .select({ count: sql<number>`count(*)` })
+        .from(documents)
+        .where(sql`
+          EXISTS (
+            SELECT 1 FROM ${documentApprovals} da
+            WHERE da.document_id = ${documents.id}
+            AND da.reviewer_position_id = ${ctx.activePositionId}
+            AND da.action_status = 'PENDING'
+          )
+          AND ${documents.currentStatus} = 'IN_REVIEW'
+        `);
+
+      // 2. Pending Outgoing Letter Reviews
+      const [pendingOutgoing] = await ctx.db
+        .select({ count: sql<number>`count(*)` })
+        .from(documents)
+        .where(sql`
+          EXISTS (
+            SELECT 1 FROM ${documentApprovals} da
+            WHERE da.document_id = ${documents.id}
+            AND da.reviewer_position_id = ${ctx.activePositionId}
+            AND da.action_status = 'PENDING'
+          )
+          AND ${documents.currentStatus} = 'IN_REVIEW'
+          AND ${documents.documentType} = 'OUTGOING_LETTER'
+        `);
+
+      // 3. Pending Dinas Note Reviews
+      const [pendingDinasNote] = await ctx.db
+        .select({ count: sql<number>`count(*)` })
+        .from(documents)
+        .where(sql`
+          EXISTS (
+            SELECT 1 FROM ${documentApprovals} da
+            WHERE da.document_id = ${documents.id}
+            AND da.reviewer_position_id = ${ctx.activePositionId}
+            AND da.action_status = 'PENDING'
+          )
+          AND ${documents.currentStatus} = 'IN_REVIEW'
+          AND ${documents.documentType} = 'DINAS_NOTE'
+        `);
+
+      // 4. Drafts (Konsep)
+      const [draftCount] = await ctx.db
+        .select({ count: sql<number>`count(*)` })
+        .from(documents)
+        .where(and(
+          eq(documents.senderPositionId, ctx.activePositionId),
+          inArray(documents.currentStatus, ["DRAFT", "NEEDS_REVISION"])
+        ));
+
+      // 5. Active Inbox items (Surat masuk)
+      const [inboxCount] = await ctx.db
+        .select({ count: sql<number>`count(*)` })
+        .from(documents)
+        .where(sql`
+          EXISTS (
+            SELECT 1 FROM ${documentRecipients} dr
+            WHERE dr.document_id = ${documents.id}
+            AND dr.position_id = ${ctx.activePositionId}
+            AND ${documents.currentStatus} = 'SIGNED_AND_PUBLISHED'
+          )
+          OR EXISTS (
+            SELECT 1 FROM ${dispositions} dsp
+            WHERE dsp.document_id = ${documents.id}
+            AND dsp.to_position_id = ${ctx.activePositionId}
+          )
+        `);
+
+      return {
+        pendingReviews: Number(pendingReviews.count),
+        pendingOutgoing: Number(pendingOutgoing.count),
+        pendingDinasNote: Number(pendingDinasNote.count),
+        draftCount: Number(draftCount.count),
+        inboxCount: Number(inboxCount.count),
       };
     }),
     

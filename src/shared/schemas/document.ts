@@ -57,13 +57,16 @@ export const documentReviewActionSchema = z.object({
 
 export type DocumentReviewActionInput = z.infer<typeof documentReviewActionSchema>;
 
-// Schema for fetching documents (Inbox/Outbox)
+// Schema for fetching documents (Inbox/Outbox/Nota Dinas/Surat Keluar)
 export const getDocumentsSchema = z.object({
   page: z.number().min(1).default(1),
   limit: z.number().min(1).max(100).default(10),
   status: DocumentStatusEnum.optional(),
+  statuses: z.array(DocumentStatusEnum).optional(),
+  documentType: DocumentTypeEnum.optional(),
+  view: z.string().optional(),
   search: z.string().optional(),
-  type: z.enum(["INBOX", "OUTBOX"]).default("INBOX"),
+  type: z.enum(["INBOX", "OUTBOX", "DISPOSITIONS_SENT"]).default("INBOX"),
 });
 
 export type GetDocumentsInput = z.infer<typeof getDocumentsSchema>;

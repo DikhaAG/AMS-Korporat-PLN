@@ -27,9 +27,11 @@ export function InboxFilters() {
         </SelectTrigger>
         <SelectContent className="rounded-xl shadow-ambient border-border/50">
           <SelectItem value="ALL">Semua Status</SelectItem>
-          <SelectItem value="DRAFT">Draft</SelectItem>
-          <SelectItem value="IN_REVIEW">Sedang Direviu</SelectItem>
-          <SelectItem value="SIGNED_AND_PUBLISHED">Terkirim / Sah</SelectItem>
+          <SelectItem value="DRAFT">Konsep (Draft)</SelectItem>
+          <SelectItem value="IN_REVIEW">Sedang Direviu / Paraf</SelectItem>
+          <SelectItem value="NEEDS_REVISION">Perlu Revisi</SelectItem>
+          <SelectItem value="SIGNED_AND_PUBLISHED">Terkirim / Sah (TTE)</SelectItem>
+          <SelectItem value="REJECTED">Ditolak / Batal</SelectItem>
         </SelectContent>
       </Select>
     </div>

@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useSession, signOut } from "@/lib/auth-client"
 import { useTRPC } from "@/trpc/client"
 import { useQuery } from "@tanstack/react-query"
@@ -59,7 +59,7 @@ interface NavItem {
   title: string
   url: string
   icon: React.ComponentType<{ className?: string }>
-  badgeType?: "pending" | "inbox"
+  badgeType?: "pending" | "pendingOutgoing" | "pendingDinasNote" | "draft" | "inbox"
 }
 
 interface NavGroup {
@@ -71,37 +71,37 @@ const navGroups: NavGroup[] = [
   {
     label: "SURAT MASUK",
     items: [
-      { title: "Surat Masuk", url: "/inbox", icon: Inbox },
-      { title: "Terkirim", url: "/inbox/terkirim", icon: Send },
+      { title: "Surat Masuk", url: "/inbox?view=inbox&type=INBOX", icon: Inbox, badgeType: "inbox" },
+      { title: "Terkirim", url: "/inbox?view=dispositions-sent&type=DISPOSITIONS_SENT", icon: Send },
     ],
   },
   {
     label: "SURAT KELUAR",
     items: [
-      { title: "Persetujuan", url: "/outbox/persetujuan", icon: CheckCircle, badgeType: "pending" },
-      { title: "Telusuri", url: "/outbox/telusuri", icon: Search },
-      { title: "Konsep", url: "/outbox/konsep", icon: FileText },
-      { title: "Terkirim", url: "/outbox/terkirim", icon: Send },
-      { title: "Dibatalkan", url: "/outbox/dibatalkan", icon: XCircle },
+      { title: "Persetujuan", url: "/inbox?view=persetujuan&docType=OUTGOING_LETTER", icon: CheckCircle, badgeType: "pendingOutgoing" },
+      { title: "Telusuri", url: "/inbox?view=telusuri&docType=OUTGOING_LETTER&type=OUTBOX", icon: Search },
+      { title: "Konsep", url: "/inbox?view=konsep&docType=OUTGOING_LETTER&type=OUTBOX", icon: FileText, badgeType: "draft" },
+      { title: "Terkirim", url: "/inbox?view=terkirim&docType=OUTGOING_LETTER&type=OUTBOX", icon: Send },
+      { title: "Dibatalkan", url: "/inbox?view=dibatalkan&docType=OUTGOING_LETTER&type=OUTBOX", icon: XCircle },
     ],
   },
   {
     label: "NOTA DINAS",
     items: [
-      { title: "Nota Dinas", url: "/nota-dinas", icon: FolderOpen },
-      { title: "Persetujuan", url: "/nota-dinas/persetujuan", icon: CheckCircle, badgeType: "pending" },
-      { title: "Telusuri", url: "/nota-dinas/telusuri", icon: Search },
-      { title: "Konsep", url: "/nota-dinas/konsep", icon: FileText },
-      { title: "Terkirim", url: "/nota-dinas/terkirim", icon: Send },
-      { title: "Dibatalkan", url: "/nota-dinas/dibatalkan", icon: XCircle },
+      { title: "Nota Dinas", url: "/inbox?view=inbox&docType=DINAS_NOTE&type=INBOX", icon: FolderOpen },
+      { title: "Persetujuan", url: "/inbox?view=persetujuan&docType=DINAS_NOTE", icon: CheckCircle, badgeType: "pendingDinasNote" },
+      { title: "Telusuri", url: "/inbox?view=telusuri&docType=DINAS_NOTE&type=OUTBOX", icon: Search },
+      { title: "Konsep", url: "/inbox?view=konsep&docType=DINAS_NOTE&type=OUTBOX", icon: FileText },
+      { title: "Terkirim", url: "/inbox?view=terkirim&docType=DINAS_NOTE&type=OUTBOX", icon: Send },
+      { title: "Dibatalkan", url: "/inbox?view=dibatalkan&docType=DINAS_NOTE&type=OUTBOX", icon: XCircle },
     ],
   },
   {
     label: "NASKAH DINAS GABUNGAN",
     items: [
-      { title: "Naskah Dinas Gabungan", url: "/gabungan", icon: FolderOpen },
-      { title: "Persetujuan", url: "/gabungan/persetujuan", icon: CheckCircle },
-      { title: "Terkirim", url: "/gabungan/terkirim", icon: Send },
+      { title: "Naskah Dinas Gabungan", url: "/inbox?view=inbox&docType=CIRCULAR_LETTER&type=INBOX", icon: FolderOpen },
+      { title: "Persetujuan", url: "/inbox?view=persetujuan&docType=CIRCULAR_LETTER", icon: CheckCircle },
+      { title: "Terkirim", url: "/inbox?view=terkirim&docType=CIRCULAR_LETTER&type=OUTBOX", icon: Send },
     ],
   },
 ]
@@ -116,12 +116,13 @@ const adminNavItems = [
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const pathname = usePathname()
+  const searchParams = useSearchParams()
   const trpc = useTRPC()
   const { data: sessionData } = useSession()
   const { state } = useSidebar()
   const isCollapsed = state === "collapsed"
 
-  // Fetch live profile with PBAC position and pending counts
+  // Fetch live profile with PBAC position
   const { data: profile } = useQuery(
     trpc.user.getProfile.queryOptions(undefined, {
       enabled: !!sessionData?.user,
@@ -131,7 +132,47 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
   const user = profile || (sessionData?.user as any)
   const isAdmin = user?.role === "admin"
-  const pendingCount = profile?.pendingCount || 0
+
+  // Fetch live counters for navigation badges
+  const { data: counters } = useQuery(
+    trpc.document.getNavCounters.queryOptions(undefined, {
+      enabled: !!sessionData?.user && !isAdmin,
+      staleTime: 1000 * 15,
+    })
+  )
+
+  const getBadgeCount = (type?: NavItem["badgeType"]) => {
+    if (!type || !counters) return 0
+    switch (type) {
+      case "pending":
+        return counters.pendingReviews
+      case "pendingOutgoing":
+        return counters.pendingOutgoing
+      case "pendingDinasNote":
+        return counters.pendingDinasNote
+      case "draft":
+        return counters.draftCount
+      case "inbox":
+        return counters.inboxCount
+      default:
+        return 0
+    }
+  }
+
+  const checkIsActive = (itemUrl: string) => {
+    const [targetPath, targetSearch] = itemUrl.split("?")
+    if (pathname !== targetPath) return false
+    if (!targetSearch) {
+      return !searchParams?.toString() || searchParams.toString() === "view=inbox"
+    }
+    const targetParams = new URLSearchParams(targetSearch)
+    for (const [key, value] of targetParams.entries()) {
+      if (searchParams?.get(key) !== value) {
+        return false
+      }
+    }
+    return true
+  }
 
   return (
     <Sidebar variant="floating" className="border-none shadow-ambient" {...props}>
@@ -199,8 +240,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             <SidebarGroupContent>
               <SidebarMenu>
                 {group.items.map((item) => {
-                  const isActive = pathname === item.url || pathname?.startsWith(item.url + "/")
-                  const showPendingBadge = item.badgeType === "pending" && pendingCount > 0
+                  const isActive = checkIsActive(item.url)
+                  const badgeCount = getBadgeCount(item.badgeType)
 
                   return (
                     <SidebarMenuItem key={item.title}>
@@ -219,9 +260,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                       >
                         <item.icon className={`h-4 w-4 shrink-0 transition-colors ${isActive ? "text-primary opacity-100" : "opacity-70"}`} />
                         <span className="flex-1 truncate">{item.title}</span>
-                        {showPendingBadge && (
-                          <span className="bg-primary text-primary-foreground text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm animate-pulse">
-                            {pendingCount}
+                        {badgeCount > 0 && (
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm ${
+                            item.badgeType?.startsWith("pending")
+                              ? "bg-amber-500 text-white animate-pulse"
+                              : "bg-primary text-primary-foreground"
+                          }`}>
+                            {badgeCount}
                           </span>
                         )}
                       </SidebarMenuButton>
